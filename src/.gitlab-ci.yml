@@ -1,0 +1,39 @@
+variables:
+ PROJET: myshop
+ REGISTRY_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_BUILD_REF_NAME}
+ 
+stages:
+  - build
+  - deploy
+  - test
+  - clean
+  
+build:
+  stage: build
+  only:
+    - tags
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+  script:
+    - docker build --build-arg TAG=${CI_BUILD_REF_NAME} --pull -t "$REGISTRY_IMAGE" .
+    - docker push "$REGISTRY_IMAGE"
+
+deployement:
+  stage: deploy
+  only:
+    - tags
+  image: ubuntu:latest
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+  script:
+    - ssh -t -o StrictHostKeyChecking=no ubuntu@${IP_AWS} "sudo docker rm -f ${PROJET} || true && sudo docker login -u $CI_DEPLOY_USER -p $CI_DEPLOY_PASSWORD $CI_REGISTRY && sudo docker pull ${REGISTRY_IMAGE} && sudo docker run -d --rm --name ${PROJET} -p 80:3000 ${REGISTRY_IMAGE}"
+    - ssh -t -o StrictHostKeyChecking=no ubuntu@${IP_AWS} "docker ps"
